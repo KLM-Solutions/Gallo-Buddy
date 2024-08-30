@@ -6,6 +6,4 @@ python-dotenv
 pandas
 python-docx
 langchain
-langchain-openai
-langchain-core
 langsmith
