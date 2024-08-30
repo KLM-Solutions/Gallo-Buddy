@@ -10,7 +10,8 @@ from docx import Document
 from langchain_openai import OpenAIEmbeddings
 from langchain_openai import ChatOpenAI
 from langchain.callbacks import get_openai_callback
-from langchain.schema import (
+from langchain_core.callbacks import get_openai_callback
+from langchain_core.messages import (
     SystemMessage,
     HumanMessage,
 )
