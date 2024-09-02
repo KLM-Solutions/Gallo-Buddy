@@ -1,6 +1,6 @@
 import streamlit as st
 from pinecone import Pinecone, ServerlessSpec
-import openai  # Import the entire openai module
+import openai
 import tiktoken
 from tiktoken import get_encoding
 import os
@@ -16,6 +16,7 @@ from langchain.schema import (
 )
 from langsmith import Client, trace
 import functools
+import re
 
 # Load environment variables
 load_dotenv()
@@ -36,7 +37,7 @@ os.environ["LANGCHAIN_PROJECT"] = "Gallo-Rag"
 langsmith_client = Client(api_key=LANGCHAIN_API_KEY)
 
 # Initialize OpenAI client
-openai.api_key = OPENAI_API_KEY  # Set the API key for the openai module
+openai.api_key = OPENAI_API_KEY
 
 # Initialize Pinecone client
 pc = Pinecone(api_key=PINECONE_API_KEY)
@@ -63,16 +64,20 @@ def safe_run_tree(name, run_type):
         return wrapper
     return decorator
 
+def preprocess_text(text):
+    # Preserve original text, only remove extra whitespace
+    return ' '.join(text.split())
+
 def extract_text_from_docx(file):
     doc = Document(file)
     text = "\n".join([para.text for para in doc.paragraphs])
-    return text
+    return text  # Return the original text without any preprocessing
 
 @safe_run_tree(name="generate_embedding", run_type="llm")
 def generate_embedding(text):
     embeddings = OpenAIEmbeddings()
     with get_openai_callback() as cb:
-        embedding = embeddings.embed_query(text)
+        embedding = embeddings.embed_query(text.lower())
     return embedding
 
 def upsert_document(document_text, metadata, namespace):
@@ -80,10 +85,11 @@ def upsert_document(document_text, metadata, namespace):
     chunks = [document_text[i:i+max_chunk_size] for i in range(0, len(document_text), max_chunk_size)]
     
     for i, chunk in enumerate(chunks):
+        # Generate embedding using lowercase version for better matching
         embedding = generate_embedding(chunk)
         if embedding:
             chunk_metadata = metadata.copy()
-            chunk_metadata['text'] = chunk
+            chunk_metadata['text'] = chunk  # Store the original text with formatting
             chunk_metadata['chunk_id'] = f"{metadata['title']}_chunk_{i}"
             index.upsert(vectors=[(chunk_metadata['chunk_id'], embedding, chunk_metadata)], namespace=namespace)
 
@@ -102,14 +108,16 @@ def query_pinecone(query, namespace):
 
 @safe_run_tree(name="get_answer", run_type="chain")
 def get_answer(context, user_query):
-    chat = ChatOpenAI(model_name="gpt-4o", temperature=0.1)
+    chat = ChatOpenAI(model_name="gpt-4o", temperature=0.3)
     
     system_message = SystemMessage(content="""You are an AI assistant specializing in providing information based on the given context.
-Your task is to answer the user's query using only the provided context related to the chosen entity: {chosen_entity}.
+Your task is to answer the user's query using only the provided context related to the chosen entity.
 Do not use information from other entities or sources.
 Ensure your response is accurate, relevant, and concise.
-Provide only the necessary answer without including the entire context.""")
-    human_message = HumanMessage(content=f"Context: {context}\n\nQuestion: {user_query}\n\nPlease provide a comprehensive answer based on the given context.")
+Provide only the necessary answer without including the entire context.
+Preserve the original formatting, capitalization, symbols like $ and %, and number representations in your answer.
+Use the exact dollar amounts, percentages, and other numerical values as they appear in the context.""")
+    human_message = HumanMessage(content=f"Context: {context}\n\nQuestion: {user_query}\n\nPlease provide a comprehensive answer based on the given context, preserving all original formatting, symbols, and number representations.")
     
     with get_openai_callback() as cb:
         response = chat([system_message, human_message])
@@ -122,9 +130,9 @@ def process_query(query, selected_namespace):
         with st.spinner("Searching for the best answer..."):
             matches = query_pinecone(query, selected_namespace)
             if matches:
-                context = " ".join([f"Title: {title}\n{text}" for title, text in matches])
+                context = "\n\n".join([f"Title: {title}\n{text}" for title, text in matches])
                 answer = get_answer(context, query)
-                st.write(answer)
+                st.markdown(answer)  # Use markdown to preserve formatting
             else:
                 st.warning("I couldn't find a specific answer to your question. Please try rephrasing or ask something else.")
     else:
