@@ -75,7 +75,7 @@ def extract_text_from_docx(file):
 
 @safe_run_tree(name="generate_embedding", run_type="llm")
 def generate_embedding(text):
-    embeddings = OpenAIEmbeddings()
+    embeddings = OpenAIEmbeddings(model="text-embedding-ada-002")
     with get_openai_callback() as cb:
         embedding = embeddings.embed_query(text.lower())
     return embedding
